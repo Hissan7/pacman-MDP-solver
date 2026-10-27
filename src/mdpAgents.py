@@ -36,13 +36,13 @@
 #   Actions A : North, South, East, West.
 #   P(s'|s,a) : the api motion model (0.8 intended, 0.1 each side, walls mean stay).
 #   R(s)      : rebuilt each move from food, capsules and scared ghosts.
-#   Discount  : GAMMA.
+#   Discount  : set by the layout's parameter profile (see PROFILES).
 # Long-term values come from Value Iteration on the static map. Active ghosts are
 # handled by a short finite-horizon MDP over (cell, time): the reward at each time
 # is penalised by the predicted chance a ghost is there. The action played is the
 # argmax of expected utility at Pacman's cell.
 
-from collections import deque
+from collections import deque, namedtuple
 
 from pacman import Directions
 from game import Agent
@@ -51,27 +51,32 @@ import api
 # Motion model (matches api.directionProb).
 MOVE_PROB = 0.8
 
-# Discount factor and step cost when ghosts are present: short-sighted and urgent.
-GAMMA = 0.7
-STEP_REWARD = -1.0
-
-# Same two values for ghost-free mazes: far-sighted so distant food still pulls Pacman.
-MAZE_GAMMA = 0.95
-MAZE_STEP_REWARD = -0.04
-
 # Value Iteration stopping rules.
 EPSILON = 0.001
 MAX_ITERATIONS = 300
 
-# Rewards.
-FOOD_REWARD = 5.0            # Value of a food cell.
-LAST_FOOD_REWARD = 30.0      # Value of the final food, so the game is finished.
-CAPSULE_REWARD = 20.0        # Value of a capsule cell.
-GHOST_PENALTY = -100.0       # Penalty scaled by the chance an active ghost is in a cell.
-SCARED_GHOST_REWARD = 50.0   # Value of a cell holding a scared (edible) ghost.
+# Layouts with at most this many open cells (and ghosts) count as small grids.
+SMALL_GRID_CELLS = 40
 
-# Ghost prediction: the finite-horizon MDP looks this many moves ahead.
-GHOST_HORIZON = 10
+# Tunable model parameters, one set per kind of layout.
+Profile = namedtuple('Profile', [
+    'gamma',            # Discount factor.
+    'stepReward',       # Cost of every move, encourages short paths.
+    'foodReward',       # Value of a food cell.
+    'lastFoodReward',   # Value of the final food, so the game is finished.
+    'capsuleReward',    # Value of a capsule cell.
+    'scaredReward',     # Value of a cell holding a scared (edible) ghost.
+    'ghostPenalty',     # Penalty scaled by the chance an active ghost is in a cell.
+    'horizon'])         # Moves ahead the ghosts are predicted.
+
+PROFILES = {
+    # No ghosts: far-sighted so distant food still pulls Pacman through the maze.
+    'maze': Profile(0.95, -0.04, 5.0, 30.0, 20.0, 50.0, -100.0, 10),
+    # Tiny arena with a ghost: short-sighted and urgent.
+    'small': Profile(0.7, -1.0, 5.0, 30.0, 20.0, 50.0, -100.0, 10),
+    # Large arena with several ghosts: longer view, strong ghost penalty.
+    'large': Profile(0.9, -1.0, 5.0, 10.0, 5.0, 0.0, -1000.0, 10),
+}
 
 # Unit step for each action, and the two sideways slips for each action.
 STEP = {Directions.NORTH: (0, 1), Directions.SOUTH: (0, -1),
@@ -98,8 +103,7 @@ class MDPAgent(Agent):
         self.index = {}          # Cell (x, y) -> index in self.cells.
         self.openMoves = []      # Per cell: list of (action, next index) for open directions.
         self.previousGhosts = [] # Cell index of each ghost on the previous move.
-        self.gamma = GAMMA       # Discount factor for this game.
-        self.stepReward = STEP_REWARD  # Cost of each move for this game.
+        self.profile = PROFILES['large']  # Parameters chosen for this game's layout.
         self.transitions = []    # Per cell, per action: list of (prob, next index).
         self.utilities = []      # Utility of each cell from the latest solve.
 
@@ -140,9 +144,13 @@ class MDPAgent(Agent):
         self.index = {cell: i for i, cell in enumerate(self.cells)}
 
     def chooseProfile(self, state):
-        """Pick discount and step cost: a layout with no ghosts is a pure path-finding maze."""
+        """Pick the parameter profile from what the api shows: ghosts present, grid size."""
         if not api.ghosts(state):
-            self.gamma, self.stepReward = MAZE_GAMMA, MAZE_STEP_REWARD
+            self.profile = PROFILES['maze']
+        elif len(self.cells) <= SMALL_GRID_CELLS:
+            self.profile = PROFILES['small']
+        else:
+            self.profile = PROFILES['large']
 
     def move(self, cell, action):
         """Return the index reached from cell by action, or cell itself if blocked."""
@@ -199,7 +207,7 @@ class MDPAgent(Agent):
         """Return, per time step, the probability of the ghost being in each cell."""
         belief = {(cell, heading): 1.0}
         steps = []
-        for _ in range(GHOST_HORIZON + 1):
+        for _ in range(self.profile.horizon + 1):
             occupancy = {}
             for (i, h), p in belief.items():
                 occupancy[i] = occupancy.get(i, 0.0) + p
@@ -226,18 +234,19 @@ class MDPAgent(Agent):
 
     def buildRewards(self, state):
         """Build R(s) from food, capsules and scared ghosts in the current world."""
-        rewards = [self.stepReward] * len(self.cells)
+        rewards = [self.profile.stepReward] * len(self.cells)
         food = [self.index[f] for f in api.food(state) if f in self.index]
-        foodReward = LAST_FOOD_REWARD if len(food) == 1 else FOOD_REWARD
+        foodReward = (self.profile.lastFoodReward if len(food) == 1
+                      else self.profile.foodReward)
         for i in food:
             rewards[i] += foodReward
         for c in api.capsules(state):
             if c in self.index:
-                rewards[self.index[c]] += CAPSULE_REWARD
+                rewards[self.index[c]] += self.profile.capsuleReward
         for position, timer in api.ghostStatesWithTimes(state):
             if timer > 0:
                 for i in self.ghostCells(position):
-                    rewards[i] += SCARED_GHOST_REWARD
+                    rewards[i] += self.profile.scaredReward
         return rewards
 
     # ---- Solver ----
@@ -246,7 +255,7 @@ class MDPAgent(Agent):
         """Bellman backup for cell i: reward plus discounted best expected next value."""
         best = max(sum(p * values[j] for p, j in option)
                    for option in self.transitions[i])
-        return reward + self.gamma * best
+        return reward + self.profile.gamma * best
 
     def solve(self, rewards):
         """Run in-place Value Iteration on the static map, warm-started from last move."""
@@ -270,12 +279,12 @@ class MDPAgent(Agent):
             return self.utilities
         occupancy = [self.ghostOccupancy(cell, heading) for cell, heading in ghosts]
         values = list(self.utilities)
-        for t in range(GHOST_HORIZON - 1, 0, -1):
+        for t in range(self.profile.horizon - 1, 0, -1):
             timed = list(rewards)
             for steps in occupancy:
                 for i in set(steps[t - 1]) | set(steps[t]):
                     risk = steps[t - 1].get(i, 0.0) + steps[t].get(i, 0.0)
-                    timed[i] += GHOST_PENALTY * min(1.0, risk)
+                    timed[i] += self.profile.ghostPenalty * min(1.0, risk)
             values = [self.backup(i, timed[i], values) for i in range(len(self.cells))]
         return values
 
