@@ -3,3 +3,5 @@ DS_store
 .DS_store
 fundamentals/
 random_commands.txt
+results-log.md
+src/__pycache__/
