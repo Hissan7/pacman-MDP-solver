@@ -42,7 +42,7 @@
 # is penalised by the predicted chance a ghost is there. The action played is the
 # argmax of expected utility at Pacman's cell.
 
-from collections import deque, namedtuple
+from collections import namedtuple
 
 from pacman import Directions
 from game import Agent
@@ -55,7 +55,7 @@ MOVE_PROB = 0.8
 EPSILON = 0.001
 MAX_ITERATIONS = 300
 
-# Layouts with at most this many open cells (and ghosts) count as small grids.
+# A layout with ghosts and at most this many open cells counts as a small grid.
 SMALL_GRID_CELLS = 40
 
 # Tunable model parameters, one set per kind of layout.
@@ -99,13 +99,13 @@ class MDPAgent(Agent):
 
     def resetGameState(self):
         """Forget everything learned about the current game."""
-        self.cells = []          # Non-wall cells, indexed by position in this list.
-        self.index = {}          # Cell (x, y) -> index in self.cells.
-        self.openMoves = []      # Per cell: list of (action, next index) for open directions.
-        self.previousGhosts = [] # Cell index of each ghost on the previous move.
-        self.profile = PROFILES['large']  # Parameters chosen for this game's layout.
-        self.transitions = []    # Per cell, per action: list of (prob, next index).
-        self.utilities = []      # Utility of each cell from the latest solve.
+        self.cells = []           # Non-wall cells, indexed by position in this list.
+        self.index = {}           # Cell (x, y) -> index in self.cells.
+        self.openMoves = []       # Per cell: (action, next index) for open directions.
+        self.transitions = []     # Per cell, per action: list of (prob, next index).
+        self.utilities = []       # Utility of each cell from the latest solve.
+        self.previousGhosts = []  # Cell index of each ghost on the previous move.
+        self.profile = PROFILES['large']  # Parameters for this game's layout.
 
     def registerInitialState(self, state):
         """Build the parts of the MDP that never change (states, transitions)."""
@@ -125,7 +125,7 @@ class MDPAgent(Agent):
         if not legal:
             return api.makeMove(Directions.STOP, legal)
         here = self.index.get(api.whereAmI(state))
-        if here is None:
+        if here is None:  # Defensive: Pacman is off the known grid, so no model.
             return api.makeMove(legal[0], legal)
         rewards = self.buildRewards(state)
         self.solve(rewards)
@@ -144,7 +144,7 @@ class MDPAgent(Agent):
         self.index = {cell: i for i, cell in enumerate(self.cells)}
 
     def chooseProfile(self, state):
-        """Pick the parameter profile from what the api shows: ghosts present, grid size."""
+        """Pick a parameter profile from what the api shows: ghosts present, grid size."""
         if not api.ghosts(state):
             self.profile = PROFILES['maze']
         elif len(self.cells) <= SMALL_GRID_CELLS:
@@ -198,7 +198,11 @@ class MDPAgent(Agent):
         return None
 
     def ghostStep(self, cell, heading):
-        """Return the ghost's next (cell, heading) options: no stopping, no turning back."""
+        """Return a ghost's possible next moves as (action, cell) pairs.
+
+        Models the game's ghost rule: ghosts never stop and never turn back,
+        except at a dead end. Each option is equally likely.
+        """
         options = self.openMoves[cell]
         ahead = [(a, j) for a, j in options if a != REVERSE.get(heading)]
         return ahead if ahead else options
@@ -209,7 +213,7 @@ class MDPAgent(Agent):
         steps = []
         for _ in range(self.profile.horizon + 1):
             occupancy = {}
-            for (i, h), p in belief.items():
+            for (i, _), p in belief.items():
                 occupancy[i] = occupancy.get(i, 0.0) + p
             steps.append(occupancy)
             nextBelief = {}
@@ -221,7 +225,10 @@ class MDPAgent(Agent):
         return steps
 
     def activeGhosts(self, state):
-        """Return (cell, heading) for each non-scared ghost; heading comes from the last move."""
+        """Return (cell, heading) for each non-scared ghost.
+
+        The heading is inferred from the ghost's cell on the previous move.
+        """
         ghosts, current = [], []
         for n, (position, timer) in enumerate(api.ghostStatesWithTimes(state)):
             cell = self.nearestCell(position)
