@@ -25,22 +25,22 @@
 # Student side autograding was added by Brad Miller, Nick Hay, and
 # Pieter Abbeel (pabbeel@cs.berkeley.edu).
 
-# The skeleton of the agent here was written by Simon Parsons, based on the
-# code in pacmanAgents.py. The MDP model and solver below are our own work.
+# COMMENT : The skeleton of the agent here was written by Simon Parsons, based on the
+# COMMENT : code in pacmanAgents.py. The MDP model and solver below are our own work.
 
-# Approach
-# --------
-# Every move Pacman builds an MDP of the current world and solves it with
-# Value Iteration:
-#   States  S : every non-wall grid cell.
-#   Actions A : North, South, East, West.
-#   P(s'|s,a) : the api motion model (0.8 intended, 0.1 each side, walls mean stay).
-#   R(s)      : rebuilt each move from food, capsules and scared ghosts.
-#   Discount  : set by the layout's parameter profile (see PROFILES).
-# Long-term values come from Value Iteration on the static map. Active ghosts are
-# handled by a short finite-horizon MDP over (cell, time): the reward at each time
-# is penalised by the predicted chance a ghost is there. The action played is the
-# argmax of expected utility at Pacman's cell.
+# COMMENT : Approach
+# COMMENT : --------
+# COMMENT : Every move Pacman builds an MDP of the current world and solves it with
+# COMMENT : Value Iteration:
+# COMMENT :   States  S : every non-wall grid cell.
+# COMMENT :   Actions A : North, South, East, West.
+# COMMENT :   P(s'|s,a) : the api motion model (0.8 intended, 0.1 each side, walls mean stay).
+# COMMENT :   R(s)      : rebuilt each move from food, capsules and scared ghosts.
+# COMMENT :   Discount  : set by the layout's parameter profile (see PROFILES).
+# COMMENT : Long-term values come from Value Iteration on the static map. Active ghosts are
+# COMMENT : handled by a short finite-horizon MDP over (cell, time): the reward at each time
+# COMMENT : is penalised by the predicted chance a ghost is there. The action played is the
+# COMMENT : argmax of expected utility at Pacman's cell.
 
 from collections import namedtuple
 
@@ -48,37 +48,40 @@ from pacman import Directions
 from game import Agent
 import api
 
-# Motion model (matches api.directionProb).
+# COMMENT : Motion model (matches api.directionProb).
 MOVE_PROB = 0.8
 
-# Value Iteration stopping rules.
+# COMMENT : Value Iteration stopping rules.
 EPSILON = 0.001
 MAX_ITERATIONS = 300
 
-# A layout with ghosts and at most this many open cells counts as a small grid.
+# COMMENT : A layout with ghosts and at most this many open cells counts as a small grid.
 SMALL_GRID_CELLS = 40
 
-# Tunable model parameters, one set per kind of layout.
+# COMMENT : Tunable model parameters, one set per kind of layout.
 Profile = namedtuple('Profile', [
-    'gamma',            # Discount factor.
-    'stepReward',       # Cost of every move, encourages short paths.
-    'foodReward',       # Value of a food cell.
-    'lastFoodReward',   # Value of the final food, so the game is finished.
-    'capsuleReward',    # Value of a capsule cell.
-    'scaredReward',     # Value of a cell holding a scared (edible) ghost.
-    'ghostPenalty',     # Penalty scaled by the chance an active ghost is in a cell.
-    'horizon'])         # Moves ahead the ghosts are predicted.
+    'gamma',            # COMMENT : Discount factor.
+    'stepReward',       # COMMENT : Cost of every move, encourages short paths.
+    'foodReward',       # COMMENT : Value of a food cell.
+    'lastFoodReward',   # COMMENT : Value of the final food, so the game is finished.
+    'capsuleReward',    # COMMENT : Value of a capsule cell.
+    'scaredReward',     # COMMENT : Value of a cell holding a scared (edible) ghost.
+    'ghostPenalty',     # COMMENT : Penalty scaled by the chance an active ghost is in a cell.
+    'horizon'])         # COMMENT : Moves ahead the ghosts are predicted.
 
+# COMMENT : Values were chosen by random search over many games on fixed seeds, then
+# COMMENT : confirmed on fresh seeds. Values that suit a small grid lose badly on a large
+# COMMENT : one and vice versa, which is why there are separate profiles.
 PROFILES = {
-    # No ghosts: far-sighted so distant food still pulls Pacman through the maze.
+    # COMMENT : No ghosts: far-sighted so distant food still pulls Pacman through the maze.
     'maze': Profile(0.95, -0.04, 5.0, 30.0, 20.0, 50.0, -100.0, 10),
-    # Tiny arena with a ghost: short-sighted and urgent.
+    # COMMENT : Tiny arena with a ghost: short-sighted and urgent.
     'small': Profile(0.7, -1.0, 5.0, 30.0, 20.0, 50.0, -100.0, 10),
-    # Large arena with several ghosts: longer view, strong ghost penalty.
+    # COMMENT : Large arena with several ghosts: longer view, strong ghost penalty.
     'large': Profile(0.9, -1.0, 5.0, 10.0, 5.0, 0.0, -1000.0, 10),
 }
 
-# Unit step for each action, and the two sideways slips for each action.
+# COMMENT : Unit step for each action, and the two sideways slips for each action.
 STEP = {Directions.NORTH: (0, 1), Directions.SOUTH: (0, -1),
         Directions.EAST: (1, 0), Directions.WEST: (-1, 0)}
 SLIPS = {Directions.NORTH: (Directions.WEST, Directions.EAST),
@@ -91,24 +94,24 @@ ACTIONS = [Directions.NORTH, Directions.SOUTH, Directions.EAST, Directions.WEST]
 
 
 class MDPAgent(Agent):
-    """Pacman agent that picks moves by solving an MDP with Value Iteration."""
+    """COMMENT : Pacman agent that picks moves by solving an MDP with Value Iteration."""
 
     def __init__(self):
-        """Set up empty per-game state."""
+        """COMMENT : Set up empty per-game state."""
         self.resetGameState()
 
     def resetGameState(self):
-        """Forget everything learned about the current game."""
-        self.cells = []           # Non-wall cells, indexed by position in this list.
-        self.index = {}           # Cell (x, y) -> index in self.cells.
-        self.openMoves = []       # Per cell: (action, next index) for open directions.
-        self.transitions = []     # Per cell, per action: list of (prob, next index).
-        self.utilities = []       # Utility of each cell from the latest solve.
-        self.previousGhosts = []  # Cell index of each ghost on the previous move.
-        self.profile = PROFILES['large']  # Parameters for this game's layout.
+        """COMMENT : Forget everything learned about the current game."""
+        self.cells = []           # COMMENT : Non-wall cells, indexed by position in this list.
+        self.index = {}           # COMMENT : Cell (x, y) -> index in self.cells.
+        self.openMoves = []       # COMMENT : Per cell: (action, next index) for open directions.
+        self.transitions = []     # COMMENT : Per cell, per action: list of (prob, next index).
+        self.utilities = []       # COMMENT : Utility of each cell from the latest solve.
+        self.previousGhosts = []  # COMMENT : Cell index of each ghost on the previous move.
+        self.profile = PROFILES['large']  # COMMENT : Parameters for this game's layout.
 
     def registerInitialState(self, state):
-        """Build the parts of the MDP that never change (states, transitions)."""
+        """COMMENT : Build the parts of the MDP that never change (states, transitions)."""
         self.resetGameState()
         self.buildStates(state)
         self.buildTransitions()
@@ -116,26 +119,26 @@ class MDPAgent(Agent):
         self.utilities = [0.0] * len(self.cells)
 
     def final(self, state):
-        """Clear per-game state so the next game starts fresh."""
+        """COMMENT : Clear per-game state so the next game starts fresh."""
         self.resetGameState()
 
     def getAction(self, state):
-        """Solve the MDP for the current world and return the best legal move."""
+        """COMMENT : Solve the MDP for the current world and return the best legal move."""
         legal = [a for a in api.legalActions(state) if a != Directions.STOP]
         if not legal:
             return api.makeMove(Directions.STOP, legal)
         here = self.index.get(api.whereAmI(state))
-        if here is None:  # Defensive: Pacman is off the known grid, so no model.
+        if here is None:  # COMMENT : Defensive: Pacman is off the known grid, so no model.
             return api.makeMove(legal[0], legal)
         rewards = self.buildRewards(state)
         self.solve(rewards)
         values = self.planAhead(rewards, self.activeGhosts(state))
         return api.makeMove(self.bestAction(here, legal, values), legal)
 
-    # ---- Model construction (once per game) ----
+    # COMMENT : ---- Model construction (once per game) ----
 
     def buildStates(self, state):
-        """Collect every non-wall cell inside the grid."""
+        """COMMENT : Collect every non-wall cell inside the grid."""
         width = api.corners(state)[3][0] + 1
         height = api.corners(state)[3][1] + 1
         walls = set(api.walls(state))
@@ -144,7 +147,7 @@ class MDPAgent(Agent):
         self.index = {cell: i for i, cell in enumerate(self.cells)}
 
     def chooseProfile(self, state):
-        """Pick a parameter profile from what the api shows: ghosts present, grid size."""
+        """COMMENT : Pick a parameter profile from what the api shows: ghosts present, grid size."""
         if not api.ghosts(state):
             self.profile = PROFILES['maze']
         elif len(self.cells) <= SMALL_GRID_CELLS:
@@ -153,13 +156,13 @@ class MDPAgent(Agent):
             self.profile = PROFILES['large']
 
     def move(self, cell, action):
-        """Return the index reached from cell by action, or cell itself if blocked."""
+        """COMMENT : Return the index reached from cell by action, or cell itself if blocked."""
         dx, dy = STEP[action]
         target = (cell[0] + dx, cell[1] + dy)
         return self.index.get(target, self.index[cell])
 
     def buildTransitions(self):
-        """Precompute P(s'|s,a) as (probability, next index) lists."""
+        """COMMENT : Precompute P(s'|s,a) as (probability, next index) lists."""
         slip = (1.0 - MOVE_PROB) / 2.0
         self.transitions = []
         self.openMoves = []
@@ -174,22 +177,22 @@ class MDPAgent(Agent):
             opened = [(a, self.move(cell, a)) for a in ACTIONS]
             self.openMoves.append([(a, j) for a, j in opened if j != self.index[cell]])
 
-    # ---- Reward construction (every move) ----
+    # COMMENT : ---- Reward construction (every move) ----
 
     def ghostCells(self, position):
-        """Return indices of the cells a (possibly fractional) ghost position touches."""
+        """COMMENT : Return indices of the cells a (possibly fractional) ghost position touches."""
         xs = {int(position[0]), int(position[0] + 0.5)}
         ys = {int(position[1]), int(position[1] + 0.5)}
         return [self.index[(x, y)] for x in xs for y in ys if (x, y) in self.index]
 
     def nearestCell(self, position):
-        """Return the index of the cell nearest to a (possibly fractional) position."""
+        """COMMENT : Return the index of the cell nearest to a (possibly fractional) position."""
         rounded = (int(position[0] + 0.5), int(position[1] + 0.5))
         floored = (int(position[0]), int(position[1]))
         return self.index.get(rounded, self.index.get(floored))
 
     def heading(self, previous, current):
-        """Return the action a ghost took between two cells, or None if unknown."""
+        """COMMENT : Return the action a ghost took between two cells, or None if unknown."""
         if previous is None or current is None:
             return None
         for action, j in self.openMoves[previous]:
@@ -198,7 +201,7 @@ class MDPAgent(Agent):
         return None
 
     def ghostStep(self, cell, heading):
-        """Return a ghost's possible next moves as (action, cell) pairs.
+        """COMMENT : Return a ghost's possible next moves as (action, cell) pairs.
 
         Models the game's ghost rule: ghosts never stop and never turn back,
         except at a dead end. Each option is equally likely.
@@ -208,7 +211,7 @@ class MDPAgent(Agent):
         return ahead if ahead else options
 
     def ghostOccupancy(self, cell, heading):
-        """Return, per time step, the probability of the ghost being in each cell."""
+        """COMMENT : Return, per time step, the probability of the ghost being in each cell."""
         belief = {(cell, heading): 1.0}
         steps = []
         for _ in range(self.profile.horizon + 1):
@@ -225,7 +228,7 @@ class MDPAgent(Agent):
         return steps
 
     def activeGhosts(self, state):
-        """Return (cell, heading) for each non-scared ghost.
+        """COMMENT : Return (cell, heading) for each non-scared ghost.
 
         The heading is inferred from the ghost's cell on the previous move.
         """
@@ -240,7 +243,7 @@ class MDPAgent(Agent):
         return ghosts
 
     def buildRewards(self, state):
-        """Build R(s) from food, capsules and scared ghosts in the current world."""
+        """COMMENT : Build R(s) from food, capsules and scared ghosts in the current world."""
         rewards = [self.profile.stepReward] * len(self.cells)
         food = [self.index[f] for f in api.food(state) if f in self.index]
         foodReward = (self.profile.lastFoodReward if len(food) == 1
@@ -256,16 +259,16 @@ class MDPAgent(Agent):
                     rewards[i] += self.profile.scaredReward
         return rewards
 
-    # ---- Solver ----
+    # COMMENT : ---- Solver ----
 
     def backup(self, i, reward, values):
-        """Bellman backup for cell i: reward plus discounted best expected next value."""
+        """COMMENT : Bellman backup for cell i: reward plus discounted best expected next value."""
         best = max(sum(p * values[j] for p, j in option)
                    for option in self.transitions[i])
         return reward + self.profile.gamma * best
 
     def solve(self, rewards):
-        """Run in-place Value Iteration on the static map, warm-started from last move."""
+        """COMMENT : Run in-place Value Iteration on the static map, warm-started from last move."""
         utilities = self.utilities
         for _ in range(MAX_ITERATIONS):
             change = 0.0
@@ -277,7 +280,7 @@ class MDPAgent(Agent):
                 break
 
     def planAhead(self, rewards, ghosts):
-        """Finite-horizon Value Iteration over (cell, time) with ghost collision risk.
+        """COMMENT : Finite-horizon Value Iteration over (cell, time) with ghost collision risk.
 
         Backs up from the static utilities at the horizon to time 1 and returns the
         utility of each cell one move from now.
@@ -296,7 +299,7 @@ class MDPAgent(Agent):
         return values
 
     def bestAction(self, here, legal, values):
-        """Return the legal action with the highest expected utility from here."""
+        """COMMENT : Return the legal action with the highest expected utility from here."""
         best, bestValue = legal[0], None
         for action in legal:
             value = sum(p * values[j]
